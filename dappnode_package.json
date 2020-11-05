@@ -1,0 +1,14 @@
+{
+  "name": "dappnode-package-nginx.public.dappnode.eth",
+  "version": "0.1.0",
+  "description": "A simple way to add HTTPS to your dappnode applications.",
+  "type": "service",
+  "author": "Nathan Payre",
+  "categories": [
+    "Developer tools"
+  ],
+  "links": {
+    "homepage": "https://your-project-homepage-or-docs.io"
+  },
+  "license": "GLP-3.0"
+}

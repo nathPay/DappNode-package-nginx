@@ -1,0 +1,6 @@
+version: '3.4'
+services:
+  dappnode-package-nginx.public.dappnode.eth:
+    build: ./build
+    image: 'dappnode-package-nginx.public.dappnode.eth:0.1.0'
+    restart: always

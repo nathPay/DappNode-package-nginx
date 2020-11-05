@@ -1,0 +1,4 @@
+# DAppNodeSDK release directories
+build_*
+build/client/node_modules/*
+build/server/node_modules/*
