@@ -1,100 +1,121 @@
 var express = require('express');
 var router = express.Router();
-var fs = require('fs');
 var fsPromise = require('fs').promises;
-var path = require('path');
-var async = require('async');
+var fs = require('fs');
+var GitHub = require('github-api');
+var exec = require('child_process').exec;
+var nunjucks = require('nunjucks');
+global.atob = require("atob");
+global.Blob = require('node-blob');
 var app = express();
 
-router.get('/add', function(req, res, next) {
-  let tmp;
-  fsPromise.readFile('mail.json', 'utf8', (err) => {
-    if(err) throw err;
-  }).then(data => JSON.parse(data))
-  .then(data => {
-    tmp = data;
-  })
-  .then(() => {
-    tmp.push(req.query.email)
+nunjucks.configure({ autoescape: true });
 
-    fsPromise.writeFile('mail.json', JSON.stringify(tmp), (err) => {
-      if(err) {
-        res.send(JSON.stringify({type: "error", msg: err}));
-      }
-    }).then(() => {
-      res.send(JSON.stringify({type: "success", msg: "Tout est bon :)"}));
+const configDir = '../config.json';
+const apiKey = process.env.REACT_APP_API_KEY;
+
+function execPromise(cmd) {
+  return new Promise((resolve, reject) => {
+    exec(cmd, (error, stdout, stderr) => {
+     if (error) {
+      console.warn(error);
+     }
+     resolve(stdout? stdout : error);
+    });
+  });
+}
+
+async function getStatus() {
+  let nginxStatus = await execPromise("systemctl show -p SubState --value nginx.service");
+  return nginxStatus;
+}
+
+router.get('/getStatus', function(req, res) {
+  getStatus().then((status) => {
+    res.send(JSON.stringify({status: status, code: 1}));
+  }).catch(() => {
+    res.send(JSON.stringify({status: null, code: 0}))
+  })
+})
+
+router.get('/restart', function(req, res) {
+  execPromise("systemctl restart nginx").then(() => {
+    getStatus().then((status) => {
+      res.send(JSON.stringify({status: status, code: 1}));
+    }).catch(() => {
+      res.send(JSON.stringify({status: null, code: 0}))
     })
+  }).catch(() => {
+    res.send(JSON.stringify({status: null, code: 0}))
   })
-});
+})
 
-router.get('/download', function(req, res) {
-  let tmp;
-  let kit1;
-  let kit2;
-  let kit3;
-  let kit4;
-  let kit5;
-  // var numKit = parseInt(req.query.kit.charAt(0));
+router.post('/disable', function(req, res) {
+  execPromise("rm /etc/nginx/sites-enabled/" + req.body.packageName)
+    .then(() => {
+      res.send(JSON.stringify({type: "success", msg: "Service successfully disabled"}));
+    }).catch(() => {
+      res.send(JSON.stringify({type: "error", msg: "An error occurred..."}));
+    })
+})
 
-  fsPromise.readFile('counter.json', 'utf8', (err) => {
-    if(err) throw err;
-  }).then(data => JSON.parse(data))
-  .then(data => {
-    tmp = data;
-    kit1 = data[0];
-    kit2 = data[1];
-    kit3 = data[2];
-    kit4 = data[3];
-    kit5 = data[4];
-  })
+router.post('/enable', function(req, res) {
+  execPromise("ln -s /etc/nginx/sites-available/" + req.body.packageName + " /etc/nginx/sites-enabled/" + req.body.packageName)
   .then(() => {
-    switch (parseInt(req.query.kit.charAt(0))) {
-      case 1:
-        tmp[0] = kit1 + 1;
-        tmp[1] = kit2;
-        tmp[2] = kit3;
-        tmp[3] = kit4;
-        tmp[4] = kit5;
-        break;
-      case 2:
-        tmp[0] = kit1;
-        tmp[1] = kit2 + 1;
-        tmp[2] = kit3;
-        tmp[3] = kit4;
-        tmp[4] = kit5;
-        break;
-      case 3:
-        tmp[0] = kit1;
-        tmp[1] = kit2;
-        tmp[2] = kit3 + 1;
-        tmp[3] = kit4;
-        tmp[4] = kit5;
-        break;
-      case 4:
-        tmp[0] = kit1;
-        tmp[1] = kit2;
-        tmp[2] = kit3;
-        tmp[3] = kit4 + 1;
-        tmp[4] = kit5;
-        break;
-      case 5:
-        tmp[0] = kit1;
-        tmp[1] = kit2;
-        tmp[2] = kit3;
-        tmp[3] = kit4;
-        tmp[4] = kit5 + 1;
-        break;
-      default:
-        break;
+    res.send(JSON.stringify({type: "success", msg: "Service successfully enabled"}));
+  }).catch(() => {
+    res.send(JSON.stringify({type: "error", msg: "An error occurred..."}));
+  })
+})
+
+router.post('/remove', function(req, res) {
+
+})
+
+
+
+router.post('/install', async function(req, res) {
+  // let nginxIsActive = await execPromise("systemctl is-active nginx");
+  // console.log(nginxIsActive);
+  // if(nginxIsActive === "active") {
+  console.log("Starting");
+  let certificateProm = await execPromise("letsencrypt certonly -n --nginx -m " + req.body.mail + " --agree-tos -d " + req.body.domainName)
+  Promise.resolve(certificateProm).then(async (result) => {
+    console.log(result);
+    if(result.hasOwnProperty("code")) {
+      res.send(JSON.stringify({type: "error", msg: "Error: Check Server logs for more information..."}));
+    } else {
+      let gh = new GitHub({token: apiKey});
+      let repoName = req.body.fullname.split("/");
+      try {
+        let repo = await gh.getRepo(repoName[0], repoName[1]);        
+        let nginxJ2 = await repo.getContents(req.body.branch, "nginx/" + req.body.version.version + "/nginx.j2");
+        let test = atob(nginxJ2.data.content);
+        let nginxJ2Ready = nunjucks.renderString(test, { DOMAIN_NAME: req.body.domainName, PROXY_PORT: req.body.port});
+        fsPromise.writeFile("/etc/nginx/sites-available/" + req.body.packageName, nginxJ2Ready, (err) => {
+          if(err) {
+            res.send(JSON.stringify({type: "error", msg: err}));
+          }
+          console.log("file created");
+        }).then(() => {
+          if(fs.existsSync("/etc/nginx/sites-enabled/" + req.body.packageName)) {
+            res.send(JSON.stringify({type: "success", msg: "Configuration loaded. Please restart nginx."}))
+          } else {
+            fsPromise.symlink("/etc/nginx/sites-available/" + req.body.packageName, "/etc/nginx/sites-enabled/" + req.body.packageName, (err) => {
+              if(err) {
+                res.send(JSON.stringify({type: "error", msg: err}));
+              }
+              console.log("link created");
+            }).then(() => {
+              res.send(JSON.stringify({type: "success", msg: "Configuration loaded. Please restart nginx."}))
+            })
+          }
+        })
+      } catch (e) {
+        res.send(JSON.stringify({type: "error", msg: e}));
+      }
     }
   })
-  .then(() => {
-    fsPromise.writeFile('counter.json', JSON.stringify(tmp), (err) => {
-      if(err) throw err;
-    })
-  })
-  const file = 'public/kits/' + req.query.kit;
-  res.download(file);
 });
 
 router.get('/idea', function(req, res, next) {

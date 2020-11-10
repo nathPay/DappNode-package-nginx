@@ -1,8 +1,7 @@
 import React from 'react';
 import { useState, useEffect } from 'react';
-import { InputBase, Button, CircularProgress, 
-  Paper, ButtonGroup, FormControl, InputLabel,
-  Select, MenuItem, TextField, Typography, Grid, IconButton, Divider } from '@material-ui/core';
+import { Button, CircularProgress, Paper, Typography, 
+  Grid, IconButton, Divider } from '@material-ui/core';
 import { makeStyles } from '@material-ui/core/styles';
 import { useSnackbar } from 'notistack';
 import Accordion from '@material-ui/core/Accordion';
@@ -11,8 +10,6 @@ import AccordionSummary from '@material-ui/core/AccordionSummary';
 import ExpandMoreIcon from '@material-ui/icons/ExpandMore';
 import FiberManualRecordIcon from '@material-ui/icons/FiberManualRecord';
 import GitHubIcon from '@material-ui/icons/GitHub';
-
-import GitHub from 'github-api';
 
 const useStyles = makeStyles(theme => ({
 
@@ -30,30 +27,57 @@ const useStyles = makeStyles(theme => ({
 export default function DashBoard(props) {
   const classes = useStyles();
   const { enqueueSnackbar } = useSnackbar();
-  var gh = new GitHub({token: "88dddbc8ad2a4bc7d01c4816df980eb4c64a7e5c"});
   // const [spacing, setSpacing] = React.useState(2);
   const [expanded, setExpanded] = useState(false);
-  const [test, setTest] = useState("");
+  const [changeStatusLoading, setChangeStatusLoading] = useState(false);
+  
 
   const handleChangeAccordion = (panel) => (event, isExpanded) => {
     setExpanded(isExpanded ? panel : false);
   };
 
-  useEffect(async () => {
-    let repo = await gh.getRepo("nathPay", "DAppNodePackage-bitwarden");
-    let content = await repo.getContents("master", "./releases.json");
-    setTest(content);
-  }, [])
+  function disableService(packageName) {
+    setChangeStatusLoading(true);
+    let requestOptions = {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        packageName
+      })
+    }
+    fetch(props.express + '/nginx/disable', requestOptions)
+    .then(res => res.json())
+    .then(res => {
+      setChangeStatusLoading(false);
+      enqueueSnackbar(res.msg, {variant: res.type});
+    })
+  }
+
+  function enableService(packageName) {
+    setChangeStatusLoading(true);
+    let requestOptions = {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        packageName
+      })
+    }
+    fetch(props.express + '/nginx/enable', requestOptions)
+    .then(res => res.json())
+    .then(res => {
+      setChangeStatusLoading(false);
+      enqueueSnackbar(res.msg, {variant: res.type});
+    })
+  }
   
   return (
     <Grid container spacing={3}>
       <Grid item xs={12}>
           <Paper className={classes.paper}>
-            <h2>DASHBOARD</h2>
-            <br></br>
+            <Typography variant="h3">DASHBOARD</Typography>
             {
               props.elements.map((el, index) => (
-                <Accordion expanded={expanded === index} onChange={handleChangeAccordion(index)} >
+                <Accordion id={"accordionDashBoard-" + index} expanded={expanded === index} onChange={handleChangeAccordion(index)} >
                   <AccordionSummary
                     expandIcon={<ExpandMoreIcon />}
                     id={index + "-header"}
@@ -101,8 +125,8 @@ export default function DashBoard(props) {
                       <Grid item xs={3}>
                         { 
                         el.nginxState === "enabled" ? 
-                        <Button variant="contained" color="primary">Enable</Button> :
-                        <Button variant="contained" color="primary">Activate</Button>
+                        <Button onClick={() => disableService(el.packageName)} variant="contained" color="primary">Disable</Button> :
+                        <Button onClick={() => enableService(el.packageName)} variant="contained" color="primary">Enable</Button>
                         }
                         
                       </Grid>
@@ -114,7 +138,6 @@ export default function DashBoard(props) {
             
           </Paper>
       </Grid>
-      {JSON.stringify(test)}
     </Grid>
   );
 }
